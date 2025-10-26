@@ -9,7 +9,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- pdf.js for reading PDF files -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght=400;500;700&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Noto Sans TC', sans-serif;
@@ -273,8 +273,10 @@
 
         loadingOverlay.classList.remove('hidden');
         
-        const apiKey = ""; // Canvas will provide this
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+        // --- START: API KEY 替換為代理服務 ---
+        // 代理 API 的 URL。請將此替換為您 Cloudflare Worker 或其他 Serverless Function 的完整 URL。
+        const PROXY_API_URL = 'quiz-gemini-proxy.fuwen.workers.dev'; 
+        // --- END: API KEY 替換為代理服務 ---
 
         let systemPrompt;
         let jsonSchema;
@@ -313,7 +315,7 @@
             };
         }
         
-        // Construct payload with text and images
+        // Construct parts for the LLM
         const parts = [];
         const userPrompt = "請根據以下提供的文字和圖片內容出題。";
         parts.push({ text: userPrompt });
@@ -329,25 +331,33 @@
             });
         });
 
-        const payload = {
-            contents: [{ parts: parts }],
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { responseMimeType: "application/json", responseSchema: jsonSchema }
+        // 這是要傳遞給代理服務的最終 payload 結構
+        const proxyPayload = {
+            model: 'gemini-2.5-flash-preview-05-20', // 指定模型名稱，讓代理服務知道要呼叫哪個端點
+            requestBody: { // 這是原本要發送給 Google API 的內容
+                contents: [{ parts: parts }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: { responseMimeType: "application/json", responseSchema: jsonSchema }
+            }
         };
 
         try {
-            const response = await fetch(apiUrl, {
+            // 對代理服務發起請求
+            const response = await fetch(PROXY_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(proxyPayload)
             });
 
             if (!response.ok) {
-                if (response.status === 401) {
-                    throw new Error('API 請求失敗 (401): 授權無效。這通常表示 API 金鑰遺失或不正確。此應用程式預期在特定平台（Canvas）上運行，由平台自動提供金鑰。若您在其他地方執行，可能會出現此錯誤。');
-                }
-                const errorBody = await response.text();
-                throw new Error(`API 請求失敗: ${response.status} ${response.statusText}\n${errorBody}`);
+                // 處理代理服務返回的錯誤
+                let errorDetails = response.statusText;
+                try {
+                    const errorBody = await response.json();
+                    errorDetails = errorBody.error || errorDetails;
+                } catch {}
+
+                throw new Error(`生成服務失敗: ${response.status} ${errorDetails}`);
             }
 
             const result = await response.json();
@@ -559,4 +569,3 @@
 
 </body>
 </html>
-
